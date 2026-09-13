@@ -1,0 +1,7 @@
+node_modules
+.next
+.pocketpot
+test-results
+playwright-report
+package-lock.json
+public/icons

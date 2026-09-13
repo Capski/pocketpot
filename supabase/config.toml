@@ -1,0 +1,9 @@
+project_id = "pocketpot"
+
+[auth]
+enable_anonymous_sign_ins = true
+site_url = "https://pocketpot.vercel.app"
+additional_redirect_urls = ["https://pocketpot.vercel.app", "http://localhost:3000", "http://localhost:3001"]
+
+[auth.rate_limit]
+anonymous_users = 30

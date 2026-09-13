@@ -1,0 +1,10 @@
+node_modules
+.next
+.pocketpot
+.env*
+.git
+.codex
+.agents
+test-results
+playwright-report
+*.tsbuildinfo
