@@ -66,6 +66,9 @@ test("mobile creation, host controls, practice table and responsive layout", asy
   ).toBeTruthy();
   await page.getByRole("button", { name: "Create a room" }).click();
   await page.getByLabel("Your display name").fill("Alex");
+  await expect(page.getByLabel("Minimum buy-in")).toHaveValue("10");
+  await expect(page.getByLabel("Pause between betting rounds to reveal cards")).toBeChecked();
+  await expect(page.getByLabel("How actions are recorded")).toHaveValue("individual");
   await page.getByRole("button", { name: "Create private room" }).click();
   await expect(page.getByRole("heading", { name: "Friday night poker" })).toBeVisible();
   await expect(page.getByText("Waiting for another player.")).toBeVisible();
@@ -90,6 +93,66 @@ test("mobile creation, host controls, practice table and responsive layout", asy
   await page.goto("/");
   await expect(page.locator(".home-page")).toHaveAttribute("data-ready", "true");
   await page.screenshot({ path: "test-results/desktop-home.png", fullPage: true });
+});
+
+test("spoken table waits for cards and keeps every device informed", async ({ browser }) => {
+  const host = await device(browser),
+    guest = await device(browser);
+  await init(host.request);
+  await init(guest.request);
+  const created = await host.request.post("/api/rooms", {
+    headers: { origin },
+    data: {
+      name: "Spoken table",
+      playerName: "Alex",
+      config: { ...config, actionMode: "spoken", pauseBetweenStreets: true },
+    },
+  });
+  expect(created.ok()).toBeTruthy();
+  let r = (await created.json()) as RoomView;
+  const pending = await command(guest.request, r, {
+    type: "request",
+    kind: "join",
+    name: "Sam",
+    amount: 500,
+  });
+  r = await command(host.request, pending, {
+    type: "approve",
+    requestId: pending.requests.at(-1)!.id,
+  });
+  const hostPage = await host.newPage(),
+    guestPage = await guest.newPage();
+  await hostPage.goto(`/room/${r.id}`);
+  await guestPage.goto(`/room/${r.id}`);
+  r = await command(host.request, r, { type: "start" });
+  await expect(guestPage.getByText("Alex to act")).toBeVisible();
+  await expect(guestPage.getByRole("button", { name: "Fold", exact: true })).toHaveCount(0);
+  r = await command(host.request, r, {
+    type: "play",
+    playerId: r.game.turn!,
+    action: "call",
+    override: true,
+  });
+  await expect(guestPage.getByText("Alex called")).toBeVisible();
+  r = await command(host.request, r, {
+    type: "play",
+    playerId: r.game.turn!,
+    action: "check",
+    override: true,
+  });
+  expect(r.game.pendingStage).toBe("flop");
+  await expect(guestPage.getByText("FLOP cards next")).toBeVisible();
+  await expect(guestPage.getByText("Sam checked")).toBeVisible();
+  await expect(hostPage.getByRole("button", { name: /Cards are out/ })).toBeVisible();
+  const denied = await guest.request.post(`/api/rooms/${r.id}/commands`, {
+    headers: { origin },
+    data: { key: randomUUID(), version: r.version, command: { type: "continue" } },
+  });
+  expect(denied.ok()).toBe(false);
+  r = await command(host.request, r, { type: "continue" });
+  await expect(guestPage.getByText("Sam to act")).toBeVisible();
+  await host.close();
+  await guest.close();
 });
 
 test("separate devices join, approve, play a whole hand, assign pot, dispute, finalize", async ({

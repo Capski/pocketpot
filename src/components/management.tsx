@@ -36,6 +36,16 @@ export function Management({
     bigBlind: room.game.config.bigBlind,
     ante: room.game.config.ante,
   });
+  const [tableSettings, setTableSettings] = useState({
+    actionMode: room.game.config.actionMode ?? "individual",
+    pauseBetweenStreets: room.game.config.pauseBetweenStreets ?? false,
+  });
+  useEffect(() => {
+    setTableSettings({
+      actionMode: room.game.config.actionMode ?? "individual",
+      pauseBetweenStreets: room.game.config.pauseBetweenStreets ?? false,
+    });
+  }, [room.game.config.actionMode, room.game.config.pauseBetweenStreets]);
   const [order, setOrder] = useState(seated(room.game).map((p) => p.id));
   const [from, setFrom] = useState(room.me ?? "");
   const [to, setTo] = useState("");
@@ -196,6 +206,49 @@ export function Management({
         )}
       </section>
       <div className="manage-grid">
+        {host && (
+          <section className="manage-section">
+            <h3>Table flow</h3>
+            <p className="muted">
+              Choose how moves are recorded and whether the table waits for cards. Changes apply
+              between hands.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                send({ type: "tableSettings", ...tableSettings });
+              }}
+            >
+              <Field label="Action style">
+                <select
+                  value={tableSettings.actionMode}
+                  onChange={(e) =>
+                    setTableSettings({
+                      ...tableSettings,
+                      actionMode: e.target.value as "individual" | "spoken",
+                    })
+                  }
+                >
+                  <option value="individual">Players enter their announced actions</option>
+                  <option value="spoken">Host or co-host records spoken actions</option>
+                </select>
+              </Field>
+              <label className="toggle-row">
+                <span>Pause for the flop, turn, and river</span>
+                <input
+                  type="checkbox"
+                  checked={tableSettings.pauseBetweenStreets}
+                  onChange={(e) =>
+                    setTableSettings({ ...tableSettings, pauseBetweenStreets: e.target.checked })
+                  }
+                />
+              </label>
+              <button className="button secondary full" disabled={busy || !between}>
+                Save table flow
+              </button>
+            </form>
+          </section>
+        )}
         {me && !me.left && (
           <section className="manage-section">
             <h3>Your stack, your call.</h3>

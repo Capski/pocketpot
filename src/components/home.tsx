@@ -24,11 +24,13 @@ import { strings as s } from "@/lib/strings";
 const defaults: Config = {
   currency: "HKD",
   buyIn: 100,
-  minBuyIn: 50,
+  minBuyIn: 10,
   maxBuyIn: 200,
   smallBlind: 1,
   bigBlind: 2,
   ante: 0,
+  actionMode: "individual",
+  pauseBetweenStreets: true,
 };
 export function Home() {
   const router = useRouter();
@@ -404,6 +406,32 @@ export function Home() {
                   ))}
                 </div>
               </details>
+              <div className="table-setup">
+                <Field label="How actions are recorded">
+                  <select
+                    value={config.actionMode}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        actionMode: e.target.value as "individual" | "spoken",
+                      })
+                    }
+                  >
+                    <option value="individual">Each player enters their announced action</option>
+                    <option value="spoken">Host or co-host records spoken actions</option>
+                  </select>
+                </Field>
+                <label className="toggle-row">
+                  <span>Pause between betting rounds to reveal cards</span>
+                  <input
+                    type="checkbox"
+                    checked={config.pauseBetweenStreets}
+                    onChange={(e) =>
+                      setConfig({ ...config, pauseBetweenStreets: e.target.checked })
+                    }
+                  />
+                </label>
+              </div>
               <p className="fine-print">
                 <LockKeyhole size={13} /> Whole currency units only. No money moves through
                 PocketPot.

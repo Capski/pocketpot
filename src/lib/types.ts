@@ -8,6 +8,8 @@ export type Config = {
   smallBlind: number;
   bigBlind: number;
   ante: number;
+  actionMode?: "individual" | "spoken";
+  pauseBetweenStreets?: boolean;
 };
 export type Player = {
   id: string;
@@ -41,6 +43,13 @@ export type Game = {
   currentBet: number;
   minRaise: number;
   pots: Pot[];
+  pendingStage?: "flop" | "turn" | "river";
+  lastAction?: {
+    version: number;
+    playerId: string;
+    action: Play["action"];
+    amount?: number;
+  };
 };
 export type Funds = Record<string, { buyIn: number; cashOut: number }>;
 export type Request = {
@@ -102,6 +111,8 @@ export type Play = {
 export type Command =
   | Play
   | { type: "start" | "undo" | "settle" | "finalize" | "cancelSettlement" }
+  | { type: "continue" }
+  | { type: "tableSettings"; actionMode: "individual" | "spoken"; pauseBetweenStreets: boolean }
   | { type: "award"; potId: number; winners: string[]; odd: string[] }
   | { type: "blinds"; smallBlind: number; bigBlind: number; ante: number }
   | { type: "seats"; order: string[] }

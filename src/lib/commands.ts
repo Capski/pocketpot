@@ -11,6 +11,8 @@ export const configSchema = z
     smallBlind: amount,
     bigBlind: amount,
     ante: amount,
+    actionMode: z.enum(["individual", "spoken"]).optional(),
+    pauseBetweenStreets: z.boolean().optional(),
   })
   .strict();
 export const createSchema = z
@@ -27,6 +29,12 @@ export const commandSchema = z.discriminatedUnion("type", [
   ...(["start", "undo", "settle", "finalize", "cancelSettlement"] as const).map((type) =>
     z.object({ type: z.literal(type) }),
   ),
+  z.object({ type: z.literal("continue") }),
+  z.object({
+    type: z.literal("tableSettings"),
+    actionMode: z.enum(["individual", "spoken"]),
+    pauseBetweenStreets: z.boolean(),
+  }),
   z.object({
     type: z.literal("award"),
     potId: amount,

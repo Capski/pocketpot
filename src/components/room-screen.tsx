@@ -56,6 +56,7 @@ export function RoomScreen({ id }: { id: string }) {
   const [qr, setQr] = useState("");
   const [copied, setCopied] = useState(false);
   const [sound, setSound] = useState(false);
+  const [tableSound, setTableSound] = useState(false);
   const [vibration, setVibration] = useState(false);
   const [prefs, setPrefs] = useState(false);
   const accept = useCallback((r: RoomView) => {
@@ -108,6 +109,7 @@ export function RoomScreen({ id }: { id: string }) {
   useEffect(() => {
     localStorage.setItem("pocketpot-room", id);
     setSound(localStorage.getItem("pocketpot-sound") === "true");
+    setTableSound(localStorage.getItem("pocketpot-table-sound") === "true");
     setVibration(localStorage.getItem("pocketpot-vibration") === "true");
     void refresh();
     const timer = setInterval(() => void refresh(), 3000);
@@ -156,6 +158,28 @@ export function RoomScreen({ id }: { id: string }) {
     }
     previousTurn.current = room?.game.turn ?? null;
   }, [room?.game.turn, room?.me, sound, vibration]);
+  const previousTableCue = useRef<{ phase: string; action: number } | null>(null);
+  useEffect(() => {
+    if (!room) return;
+    const phase = `${room.game.stage}:${room.game.pendingStage ?? ""}`;
+    const action = room.game.lastAction?.version ?? 0;
+    const previous = previousTableCue.current;
+    previousTableCue.current = { phase, action };
+    if (!tableSound || !previous || (previous.phase === phase && previous.action === action))
+      return;
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.value = 0.055;
+      osc.frequency.value = previous.phase === phase ? 660 : 780;
+      osc.start();
+      osc.stop(ctx.currentTime + 0.16);
+      osc.onended = () => void ctx.close();
+    } catch {}
+  }, [room, tableSound]);
   useEffect(() => {
     if (share && room)
       QRCode.toDataURL(`${location.origin}/?code=${room.code}`, {
@@ -306,11 +330,21 @@ export function RoomScreen({ id }: { id: string }) {
                       {seated(room.game).length} / 10 seats <Users size={14} />
                     </span>
                   </div>
+                  <TableCallout room={room} send={send} busy={busy || !online} />
                   <Table room={room} />
                   <div className="hand-status">
                     <div className="street-steps">
                       {["preflop", "flop", "turn", "river", "showdown"].map((stage, i) => (
-                        <span key={stage} className={room.game.stage === stage ? "current" : ""}>
+                        <span
+                          key={stage}
+                          className={
+                            room.game.pendingStage === stage
+                              ? "up-next"
+                              : room.game.stage === stage
+                                ? "current"
+                                : ""
+                          }
+                        >
                           <i>{i + 1}</i>
                           {stage}
                         </span>
@@ -549,6 +583,19 @@ export function RoomScreen({ id }: { id: string }) {
           </label>
           <label className="toggle-row">
             <span>
+              <Volume2 size={17} /> Sound for table moves and phase changes
+            </span>
+            <input
+              type="checkbox"
+              checked={tableSound}
+              onChange={(e) => {
+                setTableSound(e.target.checked);
+                localStorage.setItem("pocketpot-table-sound", String(e.target.checked));
+              }}
+            />
+          </label>
+          <label className="toggle-row">
+            <span>
               <Radio size={17} /> Vibration on your turn
             </span>
             <input
@@ -684,6 +731,79 @@ function Pending({ room, send, busy }: { room: RoomView; send: Send; busy: boole
   );
 }
 
+function TableCallout({ room, send, busy }: { room: RoomView; send: Send; busy: boolean }) {
+  const g = room.game;
+  const manage = room.role === "host" || room.role === "cohost";
+  const actor = g.players.find((p) => p.id === g.turn)?.name;
+  const last = g.lastAction;
+  const lastName = g.players.find((p) => p.id === last?.playerId)?.name;
+  const stageName =
+    g.pendingStage ?? (g.stage === "between" ? (g.hand ? "complete" : "ready") : g.stage);
+  return (
+    <section className={`table-callout ${g.pendingStage ? "revealing" : ""}`} aria-live="polite">
+      <div className="callout-main">
+        <span className="callout-stage">
+          HAND {g.hand || "—"} · {stageName.toUpperCase()}
+        </span>
+        <strong>
+          {g.pendingStage
+            ? `${g.pendingStage.toUpperCase()} cards next`
+            : actor
+              ? `${actor} to act`
+              : g.stage === "showdown"
+                ? "Showdown · show your cards"
+                : g.stage === "between"
+                  ? "Ready for the next hand"
+                  : "Waiting for the table"}
+        </strong>
+        <span className="callout-hint">
+          {g.pendingStage
+            ? "Reveal the cards at the table, then continue."
+            : g.config.actionMode === "spoken" && actor
+              ? "Say the move aloud. The host or co-host records it."
+              : actor
+                ? "Say the move aloud, then enter it."
+                : g.stage === "showdown"
+                  ? "Decide the winners from the real cards."
+                  : ""}
+        </span>
+      </div>
+      {g.pendingStage && manage && (
+        <button
+          className="button primary"
+          disabled={busy}
+          onClick={() => send({ type: "continue" })}
+        >
+          Cards are out · continue <ArrowRight size={17} />
+        </button>
+      )}
+      {last && lastName && (
+        <div className="callout-last">
+          <span>LAST MOVE</span>
+          <strong>
+            {lastName}{" "}
+            {last.action === "allin"
+              ? "went all-in"
+              : last.action === "raise"
+                ? "raised"
+                : last.action === "call"
+                  ? "called"
+                  : last.action === "check"
+                    ? "checked"
+                    : "folded"}
+            {last.amount !== undefined && (
+              <>
+                {" "}
+                · <Money amount={last.amount} currency={g.config.currency} />
+              </>
+            )}
+          </strong>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Table({ room }: { room: RoomView }) {
   const g = room.game;
   const players = seated(g);
@@ -794,9 +914,11 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
   const [raise, setRaise] = useState(0);
   const manage = room.role === "host" || room.role === "cohost";
   const g = room.game;
-  const actor = override && manage ? overridePlayer || g.turn : room.me;
+  const spoken = g.config.actionMode === "spoken";
+  const recording = spoken || override;
+  const actor = recording && manage ? overridePlayer || g.turn : room.me;
   const l = actor ? legal(g, actor) : null;
-  const canAct = !!l && (actor === g.turn || override);
+  const canAct = !!l && (!spoken || manage) && (actor === g.turn || (recording && manage));
   useEffect(() => {
     setRaise(l?.min ?? 0);
   }, [l?.min, g.turn]);
@@ -831,13 +953,14 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
       </div>
     );
   if (g.stage === "showdown") return null;
+  if (g.pendingStage) return null;
   const move = (action: "fold" | "check" | "call" | "allin" | "raise") =>
     send({
       type: "play",
       playerId: actor!,
       action,
       ...(action === "raise" ? { amount: raise } : {}),
-      ...(override ? { override: true } : {}),
+      ...(recording ? { override: true } : {}),
     });
   return (
     <div className="action-panel">
@@ -846,16 +969,24 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
           <span className="status-dot" />
           <strong>
             {canAct
-              ? override
+              ? recording
                 ? `Recording for ${g.players.find((p) => p.id === actor)?.name}`
                 : "You’re up. Make your move."
-              : `Waiting for ${g.players.find((p) => p.id === g.turn)?.name}.`}
+              : spoken
+                ? `Waiting for ${g.players.find((p) => p.id === g.turn)?.name} to speak.`
+                : `Waiting for ${g.players.find((p) => p.id === g.turn)?.name}.`}
           </strong>
           <span className="muted">
-            {canAct ? "No rush. No timer." : "The table will update automatically."}
+            {canAct
+              ? spoken
+                ? "Listen to the player, then record the move."
+                : "Say your move aloud, then tap. No timer."
+              : spoken
+                ? "The host or co-host will record the spoken move."
+                : "The table will update automatically."}
           </span>
         </div>
-        {manage && (
+        {manage && !spoken && (
           <label className="override-toggle">
             <input
               type="checkbox"
@@ -866,8 +997,8 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
           </label>
         )}
       </div>
-      {override && manage && (
-        <Field label="Record for player (turn override)">
+      {recording && manage && (
+        <Field label={spoken ? "Record spoken move for" : "Record for player (turn override)"}>
           <select value={overridePlayer} onChange={(e) => setOverridePlayer(e.target.value)}>
             <option value="">Current turn: {g.players.find((p) => p.id === g.turn)?.name}</option>
             {g.players
@@ -959,9 +1090,11 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
               </button>
             </div>
           </div>
-          {override && (
+          {recording && (
             <p className="fine-print">
-              This action is recorded as a host/co-host override in everyone’s activity log.
+              {spoken
+                ? "The host or co-host records this move for the table."
+                : "This action is recorded as a host/co-host override in everyone’s activity log."}
             </p>
           )}
         </>

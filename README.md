@@ -24,7 +24,8 @@ Local cleanup runs when a browser initializes a session. Production cleanup runs
 - HKD/IDR, whole units, configurable buy-ins, blinds and individual antes.
 - Host-approved joins, rebuys, cash-outs, device recovery, and read-only screen pairing; optional Supabase Google and passwordless-email authentication.
 - Server-authoritative betting with heads-up action order, full/minimum raises, cumulative short-all-in reopening, uncalled returns, main/side pots, eligible winners, and explicit allocation of odd split units.
-- Own-device actions, audited host/co-host overrides including out-of-turn corrections, automatic streets, and step-by-step undo. Financial/seating/role changes establish an undo boundary so financial approvals cannot be erased by gameplay undo.
+- A choice of own-device actions or host/co-host recording of spoken moves, with audited out-of-turn corrections and step-by-step undo. New rooms pause between betting streets for the cards by default; the host or co-host continues play after the reveal. All-in runouts go straight to showdown. Financial/seating/role changes establish an undo boundary so financial approvals cannot be erased by gameplay undo.
+- Prominent turn, phase, and last-move announcements on phones and paired displays, plus optional per-device table sounds.
 - Numbered virtual seats, next-button/blind preview, sitting out, co-host appointment, and explicit host transfer.
 - Host-only cumulative buy-in data. All approved players can paginate the public audit. Private financial details are removed before the server response is built.
 - Exact zero-sum settlement, a minimum-transfer payment list, individual confirmations, dispute resolution, JSON export, and finalization without unanimous confirmation.
@@ -38,8 +39,8 @@ The current MVP limits **the entire session to 10 participants**, including play
 1. The host creates a room and shares its QR/code. The host’s initial buy-in is approved at creation.
 2. Friends request a name and buy-in. The host approves them between hands.
 3. Review seats, then deal the first hand. Physical cards and winner decisions stay with the people at the table.
-4. Each player uses their own Check / Call / Fold / All-in / Raise controls. A raise input is the **total for the current street**, including money already bet that street.
-5. The host can record a spoken action for another player. The override is explicitly marked in the shared log. Undo is available without action-confirmation dialogs.
+4. In individual mode, each player says their move aloud and enters it on their own device. In spoken mode, the host or co-host records everyone's announced moves. The host can switch modes between hands. A raise input is the **total for the current street**, including money already bet that street.
+5. With card pauses enabled, reveal the flop, turn, or river before the host or co-host presses **Cards are out · continue**. This setting can change between hands. When nobody has a betting decision left after all-ins, play goes straight to showdown. Undo is available without action-confirmation dialogs.
 6. At showdown, assign each pot to one or more eligible winners. For a split, choose exactly the required number of winners to receive one additional unit each.
 7. Between hands, handle rebuys/cash-outs, availability, blinds, and seat changes. To leave as host, transfer ownership first.
 8. End the session, review all totals, resolve disagreements, and finalize. The payment list describes transfers people make outside PocketPot.

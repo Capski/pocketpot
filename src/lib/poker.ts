@@ -11,6 +11,14 @@ export function integer(value: number, label = "Amount", minimum = 0) {
 }
 export function validateConfig(c: Config) {
   ensure(c.currency === "HKD" || c.currency === "IDR", "Choose HKD or IDR.");
+  ensure(
+    c.actionMode === undefined || c.actionMode === "individual" || c.actionMode === "spoken",
+    "Choose a table action style.",
+  );
+  ensure(
+    c.pauseBetweenStreets === undefined || typeof c.pauseBetweenStreets === "boolean",
+    "Choose whether to pause for cards.",
+  );
   integer(c.smallBlind, "Small blind", 1);
   integer(c.bigBlind, "Big blind", c.smallBlind + 1);
   integer(c.ante, "Ante");
@@ -84,6 +92,8 @@ export function startHand(g: Game) {
   Object.assign(g, positions);
   g.hand++;
   g.stage = "preflop";
+  delete g.pendingStage;
+  delete g.lastAction;
   g.pots = [];
   g.currentBet = g.config.bigBlind;
   g.minRaise = g.config.bigBlind;
@@ -113,7 +123,8 @@ export function legal(g: Game, id: string) {
     p.folded ||
     p.stack === 0 ||
     g.stage === "between" ||
-    g.stage === "showdown"
+    g.stage === "showdown" ||
+    !!g.pendingStage
   )
     return null;
   const call = Math.min(p.stack, Math.max(0, g.currentBet - p.bet));
@@ -129,6 +140,7 @@ export function legal(g: Game, id: string) {
   };
 }
 export function act(g: Game, c: Play) {
+  ensure(!g.pendingStage, "Wait for the next cards before acting.");
   const p = g.players.find((p) => p.id === c.playerId);
   const l = legal(g, c.playerId);
   ensure(p && l, "This player cannot act now.");
@@ -189,6 +201,7 @@ export function buildPots(players: Player[]): Pot[] {
   return pots;
 }
 function showdown(g: Game) {
+  delete g.pendingStage;
   returnUncalled(g);
   g.pots = buildPots(g.players);
   for (const p of g.players) {
@@ -233,9 +246,19 @@ function progress(g: Game, from: string) {
     showdown(g);
     return;
   }
-  g.stage = ({ preflop: "flop", flop: "turn", turn: "river" } as const)[
+  const nextStage = ({ preflop: "flop", flop: "turn", turn: "river" } as const)[
     g.stage as "preflop" | "flop" | "turn"
   ];
+  if (g.config.pauseBetweenStreets) {
+    g.pendingStage = nextStage;
+    g.turn = null;
+    return;
+  }
+  advanceStreet(g, nextStage);
+}
+function advanceStreet(g: Game, nextStage: "flop" | "turn" | "river") {
+  g.stage = nextStage;
+  delete g.pendingStage;
   g.currentBet = 0;
   g.minRaise = g.config.bigBlind;
   for (const p of g.players) {
@@ -243,6 +266,10 @@ function progress(g: Game, from: string) {
     p.actedAt = null;
   }
   g.turn = after(g, g.dealer, (p) => p.inHand && !p.folded && p.stack > 0)!.id;
+}
+export function continueHand(g: Game) {
+  ensure(g.pendingStage, "There are no cards waiting to be revealed.");
+  advanceStreet(g, g.pendingStage);
 }
 export function award(g: Game, potId: number, winners: string[], odd: string[]) {
   ensure(g.stage === "showdown", "There are no pots to assign.");

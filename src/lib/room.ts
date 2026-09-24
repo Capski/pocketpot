@@ -2,6 +2,7 @@ import {
   act,
   award,
   chips,
+  continueHand,
   emptyGame,
   ensure,
   integer,
@@ -201,13 +202,39 @@ export function applyCommand(
       startHand(r.game);
       text = `Hand #${r.game.hand} started. ${pname(r.game.dealer!)} has the button.`;
       break;
+    case "continue":
+      manage();
+      snapshot();
+      continueHand(r.game);
+      text = `${r.game.stage} cards are out. ${pname(r.game.turn!)} acts first.`;
+      break;
+    case "tableSettings":
+      host();
+      between();
+      r.game.config.actionMode = c.actionMode;
+      r.game.config.pauseBetweenStreets = c.pauseBetweenStreets;
+      r.undo = [];
+      text = `Table style set to ${c.actionMode === "spoken" ? "spoken actions" : "individual entry"}; card pauses ${c.pauseBetweenStreets ? "on" : "off"}.`;
+      break;
     case "play": {
       ensure(me, "You must be approved to play.");
+      if (r.game.config.actionMode === "spoken") {
+        manage();
+        ensure(c.override, "The host or co-host records spoken actions.");
+      }
       if (c.override) manage();
       else ensure(me === c.playerId, "You can only record your own action.");
       snapshot();
       const before = r.game.stage;
       const acting = player(c.playerId);
+      const amount =
+        c.action === "raise"
+          ? c.amount
+          : c.action === "call"
+            ? Math.min(acting.stack, Math.max(0, r.game.currentBet - acting.bet))
+            : c.action === "allin"
+              ? acting.stack + acting.bet
+              : undefined;
       const detail =
         c.action === "raise"
           ? ` to ${c.amount}`
@@ -217,7 +244,13 @@ export function applyCommand(
               ? ` for ${acting.stack} (total ${acting.stack + acting.bet})`
               : "";
       act(r.game, c);
-      text = `${pname(c.playerId)}: ${c.action === "allin" ? "all-in" : c.action}${detail}.${c.override ? " Host/co-host override." : ""}${before !== r.game.stage ? ` → ${r.game.stage}.` : ""}`;
+      r.game.lastAction = {
+        version: r.version + 1,
+        playerId: c.playerId,
+        action: c.action,
+        ...(amount === undefined ? {} : { amount }),
+      };
+      text = `${pname(c.playerId)}: ${c.action === "allin" ? "all-in" : c.action}${detail}.${c.override ? (r.game.config.actionMode === "spoken" ? " Recorded by host/co-host." : " Host/co-host override.") : ""}${r.game.pendingStage ? ` Waiting for ${r.game.pendingStage} cards.` : before !== r.game.stage ? ` → ${r.game.stage}.` : ""}`;
       break;
     }
     case "award":

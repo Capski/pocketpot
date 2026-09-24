@@ -4,6 +4,7 @@ import {
   award,
   buildPots,
   chips,
+  continueHand,
   emptyGame,
   legal,
   makePlayer,
@@ -59,6 +60,34 @@ describe("betting and rotation", () => {
     }
     expect(g.stage).toBe("showdown");
     expect(g.pots[0].amount).toBe(30);
+  });
+  it("waits for card reveal between streets and blocks actions until continued", () => {
+    const g = emptyGame({ ...config, pauseBetweenStreets: true });
+    g.players = [makePlayer("0", "A", 1, 500), makePlayer("1", "B", 2, 500)];
+    startHand(g);
+    play(g, "call");
+    play(g, "check");
+    expect(g.stage).toBe("preflop");
+    expect(g.pendingStage).toBe("flop");
+    expect(g.turn).toBeNull();
+    expect(legal(g, "0")).toBeNull();
+    expect(() => act(g, { type: "play", playerId: "0", action: "check", override: true })).toThrow(
+      "cards",
+    );
+    continueHand(g);
+    expect(g.stage).toBe("flop");
+    expect(g.pendingStage).toBeUndefined();
+    expect(g.turn).toBe("1");
+    expect(chips(g)).toBe(1000);
+  });
+  it("skips card pauses when all betting decisions are finished by all-ins", () => {
+    const g = emptyGame({ ...config, pauseBetweenStreets: true });
+    g.players = [makePlayer("0", "A", 1, 100), makePlayer("1", "B", 2, 100)];
+    startHand(g);
+    play(g, "allin");
+    play(g, "call");
+    expect(g.stage).toBe("showdown");
+    expect(g.pendingStage).toBeUndefined();
   });
   it("rejects out-of-turn actions, illegal checks, and undersized raises", () => {
     const g = table();
@@ -236,6 +265,15 @@ describe("room authority and ledger", () => {
     let r = add(initial());
     const before = structuredClone(r.game);
     r = applyCommand(r, "host-device", { type: "start" }, "start", r.version);
+    expect(() =>
+      applyCommand(
+        r,
+        "host-device",
+        { type: "tableSettings", actionMode: "individual", pauseBetweenStreets: false },
+        "settings-during-hand",
+        r.version,
+      ),
+    ).toThrow("between hands");
     r = applyCommand(r, "host-device", { type: "undo" }, "undo", r.version);
     expect(r.game).toEqual(before);
     expect(r.audit.at(-1)?.text).toContain("Undid");
@@ -262,6 +300,63 @@ describe("room authority and ledger", () => {
       r.version,
     );
     expect(r.audit.at(-1)?.text).toContain("override");
+  });
+  it("enforces spoken recording and host-only settings between hands", () => {
+    let r = add(
+      createRoom("room", "ABCDEF", "host-device", "Friday game", "Alex", {
+        ...config,
+        pauseBetweenStreets: true,
+      }),
+    );
+    const settings: Command = {
+      type: "tableSettings",
+      actionMode: "spoken",
+      pauseBetweenStreets: true,
+    };
+    expect(() => applyCommand(r, "guest", settings, "settings-guest", r.version)).toThrow("host");
+    r = applyCommand(r, "host-device", settings, "settings", r.version);
+    r = applyCommand(r, "host-device", { type: "cohost", playerId: "join" }, "cohost", r.version);
+    r = applyCommand(r, "host-device", { type: "start" }, "start", r.version);
+    expect(() => applyCommand(r, "guest", settings, "settings-active", r.version)).toThrow("host");
+    expect(() =>
+      applyCommand(
+        r,
+        "guest",
+        { type: "play", playerId: "join", action: "check" },
+        "self",
+        r.version,
+      ),
+    ).toThrow("host or co-host");
+    r = applyCommand(
+      r,
+      "guest",
+      { type: "play", playerId: r.game.turn!, action: "call", override: true },
+      "spoken",
+      r.version,
+    );
+    expect(r.game.lastAction?.playerId).toBe(r.host);
+    expect(project(r, "guest").game.lastAction?.action).toBe("call");
+    expect(r.audit.at(-1)?.text).toContain("Recorded by host/co-host");
+    r = applyCommand(
+      r,
+      "host-device",
+      { type: "play", playerId: r.game.turn!, action: "check", override: true },
+      "check",
+      r.version,
+    );
+    expect(r.game.pendingStage).toBe("flop");
+    expect(() =>
+      applyCommand(
+        r,
+        "guest",
+        { type: "tableSettings", actionMode: "individual", pauseBetweenStreets: false },
+        "settings-mid",
+        r.version,
+      ),
+    ).toThrow("host");
+    r = applyCommand(r, "guest", { type: "continue" }, "continue", r.version);
+    expect(r.game.stage).toBe("flop");
+    expect(r.game.turn).toBe("join");
   });
   it("rejects someone acting for another player without override", () => {
     let r = add(initial());
