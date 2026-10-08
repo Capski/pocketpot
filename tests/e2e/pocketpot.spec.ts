@@ -95,6 +95,52 @@ test("mobile creation, host controls, practice table and responsive layout", asy
   await page.screenshot({ path: "test-results/desktop-home.png", fullPage: true });
 });
 
+test("phone action dock stays on screen and raise presets submit", async ({ browser }) => {
+  const host = await device(browser),
+    guest = await device(browser);
+  let r = await create(host.request);
+  await init(guest.request);
+  const pending = await command(guest.request, r, {
+    type: "request",
+    kind: "join",
+    name: "Sam",
+    amount: 500,
+  });
+  r = await command(host.request, pending, {
+    type: "approve",
+    requestId: pending.requests.at(-1)!.id,
+  });
+  r = await command(host.request, r, { type: "start" });
+  const page = await host.newPage();
+  // Roughly the visible area of Safari on a standard iPhone.
+  await page.setViewportSize({ width: 390, height: 664 });
+  await page.goto(`/room/${r.id}`);
+  await page.getByLabel("Record spoken action").check();
+  for (const name of ["Fold", "Call $5", "Raise"])
+    await expect(page.getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 1 });
+  await page.getByRole("button", { name: "Raise", exact: true }).click();
+  await page.getByRole("button", { name: "Pot", exact: true }).click();
+  // Blinds 5/10: pot 15 plus the 5 to call, so a pot raise is to 10 + 20.
+  await expect(page.getByLabel("Raise total")).toHaveValue("30");
+  await page.getByLabel("Increase raise").click();
+  await expect(page.getByLabel("Raise total")).toHaveValue("40");
+  const confirm = page.getByRole("button", { name: "Raise to $40" });
+  await expect(confirm).toBeInViewport({ ratio: 1 });
+  await confirm.click();
+  await expect
+    .poll(
+      async () =>
+        ((await (await host.request.get(`/api/rooms/${r.id}`)).json()) as RoomView).game.currentBet,
+    )
+    .toBe(40);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+  ).toBeTruthy();
+  await page.screenshot({ path: "test-results/mobile-action-dock.png" });
+  await host.close();
+  await guest.close();
+});
+
 test("spoken table waits for cards and keeps every device informed", async ({ browser }) => {
   const host = await device(browser),
     guest = await device(browser);

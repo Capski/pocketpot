@@ -1,5 +1,12 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import {
@@ -17,6 +24,7 @@ import {
   History,
   LayoutGrid,
   LockKeyhole,
+  Minus,
   Monitor,
   Pause,
   Play,
@@ -33,6 +41,7 @@ import {
   Wallet,
   Wifi,
   WifiOff,
+  X,
 } from "lucide-react";
 import { api, ApiError, cloudMode, supabase } from "@/lib/client";
 import { legal, seated } from "@/lib/poker";
@@ -807,9 +816,7 @@ function TableCallout({ room, send, busy }: { room: RoomView; send: Send; busy: 
 function Table({ room }: { room: RoomView }) {
   const g = room.game;
   const players = seated(g);
-  const total =
-    g.players.reduce((n, p) => n + p.committed, 0) +
-    g.pots.filter((p) => !p.winners).reduce((n, p) => n + p.amount, 0);
+  const total = potTotal(g);
   return (
     <div className={`poker-table players-${players.length}`}>
       <div className="felt-edge" />
@@ -908,10 +915,170 @@ function Table({ room }: { room: RoomView }) {
   );
 }
 
+function potTotal(g: RoomView["game"]) {
+  return (
+    g.players.reduce((n, p) => n + p.committed, 0) +
+    g.pots.filter((p) => !p.winners).reduce((n, p) => n + p.amount, 0)
+  );
+}
+
+// On phones the action panel is pinned to the bottom of the screen; its height is published
+// as --dock-h so the page can reserve space and nothing stays hidden behind it.
+function Dock({ className, children }: { className: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(() =>
+      root.style.setProperty("--dock-h", `${Math.ceil(el.getBoundingClientRect().height)}px`),
+    );
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--dock-h");
+    };
+  }, []);
+  return (
+    <div ref={ref} className={`action-panel dock ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function RaiseSheet({
+  room,
+  l,
+  raise,
+  setRaise,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  room: RoomView;
+  l: NonNullable<ReturnType<typeof legal>>;
+  raise: number;
+  setRaise: (n: number) => void;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const g = room.game;
+  const currency = g.config.currency;
+  const lo = Math.min(l.min, l.max),
+    hi = l.max;
+  const step = Math.max(1, g.config.bigBlind);
+  const clamp = (n: number) => Math.min(hi, Math.max(lo, Math.round(n)));
+  const base = g.currentBet || g.config.bigBlind;
+  const potAfterCall = potTotal(g) + l.call;
+  const presets: [string, number][] = [
+    ["Min", lo],
+    [g.currentBet ? "2x" : "2 BB", clamp(base * 2)],
+    [g.currentBet ? "3x" : "3 BB", clamp(base * 3)],
+    ["½ Pot", clamp(g.currentBet + potAfterCall / 2)],
+    ["Pot", clamp(g.currentBet + potAfterCall)],
+    ["All-in", hi],
+  ];
+  const active = presets.find(([, value]) => value === raise)?.[0];
+  const valid = Number.isInteger(raise) && (raise === hi || (raise >= l.min && raise <= hi));
+  const verb = g.currentBet ? "Raise to" : "Bet";
+  return (
+    <div className="raise-sheet" role="group" aria-label={`${verb} amount`}>
+      <div className="raise-sheet-head">
+        <strong>{verb}</strong>
+        <span className="muted">
+          Min <Money amount={lo} currency={currency} /> · Max{" "}
+          <Money amount={hi} currency={currency} />
+        </span>
+        <button className="icon-button" aria-label="Close raise" onClick={onClose}>
+          <X size={18} />
+        </button>
+      </div>
+      {lo < hi && (
+        <>
+          <div className="raise-presets">
+            {presets.map(([label, value]) => (
+              <button
+                key={label}
+                className={label === active ? "selected" : ""}
+                aria-pressed={label === active}
+                disabled={busy}
+                onClick={() => setRaise(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <input
+            className="raise-slider"
+            type="range"
+            aria-label="Raise slider"
+            min={lo}
+            max={hi}
+            step={1}
+            value={valid ? raise : lo}
+            disabled={busy}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              setRaise(v >= hi ? hi : clamp(Math.round(v / step) * step));
+            }}
+          />
+          <div className="raise-stepper">
+            <button
+              className="button secondary"
+              aria-label="Decrease raise"
+              disabled={busy || raise <= lo}
+              onClick={() => setRaise(clamp(raise - step))}
+            >
+              <Minus size={18} />
+            </button>
+            <label className="sr-only" htmlFor="raise-total">
+              Raise total
+            </label>
+            <input
+              id="raise-total"
+              aria-label="Raise total"
+              type="number"
+              inputMode="numeric"
+              min={lo}
+              max={hi}
+              step={1}
+              value={raise || ""}
+              disabled={busy}
+              onChange={(e) => setRaise(Number(e.target.value))}
+            />
+            <button
+              className="button secondary"
+              aria-label="Increase raise"
+              disabled={busy || raise >= hi}
+              onClick={() => setRaise(clamp(raise + step))}
+            >
+              <Plus size={18} />
+            </button>
+          </div>
+        </>
+      )}
+      <button className="button primary full" disabled={busy || !valid} onClick={onConfirm}>
+        {raise === hi ? (
+          <>
+            All-in <Money amount={hi} currency={currency} />
+          </>
+        ) : (
+          <>
+            {verb} <Money amount={valid ? raise : lo} currency={currency} />
+          </>
+        )}
+        <ArrowUpRight size={17} />
+      </button>
+    </div>
+  );
+}
+
 function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boolean }) {
   const [override, setOverride] = useState(false);
   const [overridePlayer, setOverridePlayer] = useState("");
   const [raise, setRaise] = useState(0);
+  const [raising, setRaising] = useState(false);
   const manage = room.role === "host" || room.role === "cohost";
   const g = room.game;
   const spoken = g.config.actionMode === "spoken";
@@ -923,10 +1090,11 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
     setRaise(l?.min ?? 0);
   }, [l?.min, g.turn]);
   useEffect(() => setOverridePlayer(""), [g.turn]);
+  useEffect(() => setRaising(false), [g.turn, actor, g.stage]);
   if (room.settlement) return null;
   if (g.stage === "between")
     return (
-      <div className="action-panel between-panel">
+      <Dock className="between-panel">
         <div>
           <span className="eyebrow muted">{g.hand ? "NICE HAND" : "ALL SET?"}</span>
           <h3>
@@ -950,7 +1118,7 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
             {g.hand ? s.start : "Deal the first hand"}
           </button>
         )}
-      </div>
+      </Dock>
     );
   if (g.stage === "showdown") return null;
   if (g.pendingStage) return null;
@@ -962,29 +1130,37 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
       ...(action === "raise" ? { amount: raise } : {}),
       ...(recording ? { override: true } : {}),
     });
+  const currency = g.config.currency;
+  const actorName = g.players.find((p) => p.id === actor)?.name;
+  const turnName = g.players.find((p) => p.id === g.turn)?.name;
+  const actorStack = g.players.find((p) => p.id === actor)?.stack ?? 0;
+  const canRaise = !!l && l.canRaise && l.max > g.currentBet;
   return (
-    <div className="action-panel">
+    <Dock className={canAct ? "live" : "waiting"}>
       <div className="action-heading">
         <div>
           <span className="status-dot" />
           <strong>
             {canAct
               ? recording
-                ? `Recording for ${g.players.find((p) => p.id === actor)?.name}`
+                ? `Recording for ${actorName}`
                 : "You’re up. Make your move."
               : spoken
-                ? `Waiting for ${g.players.find((p) => p.id === g.turn)?.name} to speak.`
-                : `Waiting for ${g.players.find((p) => p.id === g.turn)?.name}.`}
+                ? `Waiting for ${turnName} to speak.`
+                : `Waiting for ${turnName}.`}
           </strong>
-          <span className="muted">
-            {canAct
-              ? spoken
-                ? "Listen to the player, then record the move."
-                : "Say your move aloud, then tap. No timer."
-              : spoken
+          {canAct && l ? (
+            <span className="action-sub">
+              Pot <Money amount={potTotal(g)} currency={currency} /> · Stack{" "}
+              <Money amount={actorStack} currency={currency} />
+            </span>
+          ) : (
+            <span className="muted">
+              {spoken
                 ? "The host or co-host will record the spoken move."
                 : "The table will update automatically."}
-          </span>
+            </span>
+          )}
         </div>
         {manage && !spoken && (
           <label className="override-toggle">
@@ -998,42 +1174,38 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
         )}
       </div>
       {recording && manage && (
-        <Field label={spoken ? "Record spoken move for" : "Record for player (turn override)"}>
-          <select value={overridePlayer} onChange={(e) => setOverridePlayer(e.target.value)}>
-            <option value="">Current turn: {g.players.find((p) => p.id === g.turn)?.name}</option>
-            {g.players
-              .filter((p) => p.id !== g.turn && legal(g, p.id))
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} (out of turn)
-                </option>
-              ))}
-          </select>
-        </Field>
+        <select
+          className="record-for"
+          aria-label={spoken ? "Record spoken move for" : "Record for player (turn override)"}
+          value={overridePlayer}
+          onChange={(e) => setOverridePlayer(e.target.value)}
+        >
+          <option value="">Current turn: {turnName}</option>
+          {g.players
+            .filter((p) => p.id !== g.turn && legal(g, p.id))
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} (out of turn)
+              </option>
+            ))}
+        </select>
       )}
       {canAct && l ? (
         <>
-          <div className="action-info">
-            <span>
-              To call{" "}
-              <strong>
-                <Money amount={l.call} currency={g.config.currency} />
-              </strong>
-            </span>
-            <span>
-              Min raise to{" "}
-              <strong>
-                <Money amount={l.min} currency={g.config.currency} />
-              </strong>
-            </span>
-            <span>
-              All-in total{" "}
-              <strong>
-                <Money amount={l.max} currency={g.config.currency} />
-              </strong>
-            </span>
-          </div>
-          <div className="action-buttons">
+          {raising && canRaise && (
+            <RaiseSheet
+              room={room}
+              l={l}
+              raise={raise}
+              setRaise={setRaise}
+              busy={busy}
+              onClose={() => setRaising(false)}
+              onConfirm={async () => {
+                if (await move(raise === l.max ? "allin" : "raise")) setRaising(false);
+              }}
+            />
+          )}
+          <div className="action-buttons" hidden={raising && canRaise}>
             <button className="button fold-button" disabled={busy} onClick={() => move("fold")}>
               Fold
             </button>
@@ -1048,50 +1220,34 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
                 </>
               ) : (
                 <>
-                  Call <Money amount={l.call} currency={g.config.currency} />
+                  Call <Money amount={l.call} currency={currency} />
                 </>
               )}
             </button>
-            <button
-              className="button secondary allin-button"
-              disabled={busy || (!l.canRaise && l.max > g.currentBet)}
-              onClick={() => move("allin")}
-            >
-              All-in
-            </button>
-            <div className="raise-control">
-              <label className="sr-only" htmlFor="raise-total">
-                Raise total
-              </label>
-              <input
-                id="raise-total"
-                aria-label="Raise total"
-                type="number"
-                inputMode="numeric"
-                min={Math.min(l.min, l.max)}
-                max={l.max}
-                step={1}
-                value={raise}
-                onChange={(e) => setRaise(Number(e.target.value))}
-                disabled={!l.canRaise || busy}
-              />
+            {canRaise ? (
               <button
-                className="button primary"
-                disabled={
-                  busy ||
-                  !l.canRaise ||
-                  l.max <= g.currentBet ||
-                  raise > l.max ||
-                  (raise < l.min && raise !== l.max)
-                }
-                onClick={() => move("raise")}
+                className="button primary raise-button"
+                disabled={busy}
+                aria-expanded={raising}
+                onClick={() => {
+                  setRaise(Math.min(l.min, l.max));
+                  setRaising(true);
+                }}
               >
-                Raise to <ArrowUpRight size={17} />
+                {g.currentBet ? "Raise" : "Bet"} <ArrowUpRight size={17} />
               </button>
-            </div>
+            ) : (
+              <button
+                className="button secondary allin-button"
+                disabled={busy || l.max > g.currentBet}
+                onClick={() => move("allin")}
+              >
+                All-in
+              </button>
+            )}
           </div>
           {recording && (
-            <p className="fine-print">
+            <p className="fine-print record-note">
               {spoken
                 ? "The host or co-host records this move for the table."
                 : "This action is recorded as a host/co-host override in everyone’s activity log."}
@@ -1103,7 +1259,7 @@ function Actions({ room, send, busy }: { room: RoomView; send: Send; busy: boole
           <span className="waiting-dots">•••</span>Your chips are safe. Enjoy the game.
         </div>
       )}
-    </div>
+    </Dock>
   );
 }
 
