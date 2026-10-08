@@ -116,6 +116,21 @@ test("phone action dock stays on screen and raise presets submit", async ({ brow
   await page.setViewportSize({ width: 390, height: 664 });
   await page.goto(`/room/${r.id}`);
   await page.getByLabel("Record spoken action").check();
+  // Seats (including the avatar above each card) must clear the callout and street steps.
+  const overlaps = await page.evaluate(() => {
+    const seats = [...document.querySelectorAll(".table-seat")].map((e) =>
+      e.getBoundingClientRect(),
+    );
+    return [".table-callout", ".hand-status"].flatMap((selector) => {
+      const o = document.querySelector(selector)!.getBoundingClientRect();
+      return seats
+        .filter(
+          (s) => s.left < o.right && s.right > o.left && s.top - 14 < o.bottom && s.bottom > o.top,
+        )
+        .map(() => selector);
+    });
+  });
+  expect(overlaps).toEqual([]);
   for (const name of ["Fold", "Call $5", "Raise"])
     await expect(page.getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 1 });
   await page.getByRole("button", { name: "Raise", exact: true }).click();

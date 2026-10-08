@@ -3258,7 +3258,7 @@ small {
   }
   .poker-table {
     height: clamp(270px, 40dvh, 330px);
-    margin: 20px 18px 8px;
+    margin: 32px 18px 18px;
   }
   .table-center {
     gap: 4px;
